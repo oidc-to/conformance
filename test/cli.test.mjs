@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Clients, suiteConfig } from "../src/config.mjs";
 import { parseArgs, resolveTarget, targetOf, UsageError } from "../src/main.mjs";
-import { combinations, formatVariant, matchingVariants, parseVariant, planName } from "../src/plans.mjs";
+import { chunks, combinations, formatVariant, matchingVariants, parseVariant, planName } from "../src/plans.mjs";
 import { children, request, startAnnouncing, userAgent } from "../src/process.mjs";
 import { merge, summarize } from "../src/summary.mjs";
 
@@ -34,13 +34,26 @@ const plan = {
 
 test("variants expand without mTLS and filter by axis=value", () => {
   assert.equal(combinations({ a: [1, 2], b: [3, 4] }).length, 4);
-  assert.equal(matchingVariants(plan, {}).length, 4);
+  assert.equal(matchingVariants(plan, parseVariant("")).length, 4);
   const filtered = matchingVariants(plan, parseVariant("response_type=code id_token"));
   assert.deepEqual(filtered.map(formatVariant), [
     "client_auth_type=none,response_type=code id_token",
     "client_auth_type=private_key_jwt,response_type=code id_token",
   ]);
   assert.equal(planName("p", { a: "b" }, "m1,m2"), "p[a=b]:m1,m2");
+  const some = matchingVariants(plan, parseVariant("client_auth_type=none,response_type=code;client_auth_type=private_key_jwt"));
+  assert.deepEqual(some.map(formatVariant), [
+    "client_auth_type=none,response_type=code",
+    "client_auth_type=private_key_jwt,response_type=code",
+    "client_auth_type=private_key_jwt,response_type=code id_token",
+  ]);
+});
+
+test("variants split into jobs of nearly equal size", () => {
+  const sizes = (n, k) => chunks(Array.from({ length: n }, (_, i) => i), k).map((c) => c.length);
+  assert.deepEqual(sizes(121, 10), [12, 12, 12, 12, 13, 12, 12, 12, 12, 12]);
+  assert.deepEqual(sizes(3, 3), [1, 1, 1]);
+  assert.deepEqual(chunks([1, 2, 3], 1), [[1, 2, 3]]);
 });
 
 const module = (testModule, result, conditions = []) => ({ testModule, result, conditions, shots: [] });

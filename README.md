@@ -134,7 +134,7 @@ This repository's [Conformance](.github/workflows/conformance.yml) workflow runs
 gh workflow run conformance.yml -R oidc-to/conformance -f issuer=https://oidc.to.scaffoldly.dev -f max_parallel=2
 ```
 
-The variants job fills the cache when it is cold, so every matrix job loads the images from it and none pulls them. It uses [`configs/oidc.to.mjs`](configs/oidc.to.mjs), which has oidc.to's sign-in automation and no keys. Every client is registered dynamically, and `oidcc-server-rotate-keys` is skipped. `max_parallel` caps how many variants run at once; without it, the `CONFORMANCE_MAX_PARALLEL` repository variable does, else 256. `0` runs every variant one after another in a single job, which can take up to its 6-hour limit. The uploaded artifacts leave out the suite's exported plans, because those contain client secrets and private keys.
+The variants job fills the cache when it is cold, so every matrix job loads the images from it and none pulls them. It uses [`configs/oidc.to.mjs`](configs/oidc.to.mjs), which has oidc.to's sign-in automation and no keys. Every client is registered dynamically, and `oidcc-server-rotate-keys` is skipped. `max_parallel` is how many jobs the variants are split across, and so how many run at once and how many suite tunnels a run opens; without it, the `CONFORMANCE_MAX_PARALLEL` repository variable sets it, else 10. Each job runs its share one after another. `0` or `1` runs them all in a single job, which can take up to its 6-hour limit. The uploaded artifacts leave out the suite's exported plans, because those contain client secrets and private keys.
 
 The runner retries its own requests to the OP (discovery, registration, the JWKS) when they get a 429 or 503, after the Retry-After. The suite's requests during a module are not retried, so a throttled OP fails that module; lower `max_parallel` instead.
 
@@ -144,7 +144,7 @@ The runner retries its own requests to the OP (discovery, registration, the JWKS
 oidc-conformance [options] <issuer>
 oidc-conformance [options] <command...>
 oidc-conformance [options]                          # the config's command
-oidc-conformance variants [--plan] [--variant]      # JSON matrix; sets the matrix output in Actions
+oidc-conformance variants [--plan] [--variant] [--jobs n]  # JSON matrix in n jobs; sets the matrix output in Actions
 oidc-conformance merge [--out dir] <summary.json...>
 ```
 

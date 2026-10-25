@@ -1,6 +1,6 @@
 name: Conformance
 
-# oidcc-test-plan against a deployed oidc.to, one job per variant (or one for them all), merged into one table.
+# oidcc-test-plan against a deployed oidc.to, split across jobs, merged into one table.
 on:
   workflow_dispatch:
     inputs:
@@ -9,7 +9,7 @@ on:
         required: true
         default: https://oidc.to.scaffoldly.dev
       max_parallel:
-        description: Matrix jobs run at once; 0 runs every variant in one job; default the CONFORMANCE_MAX_PARALLEL variable, else 256
+        description: Jobs, each one suite and tunnel running its share of the variants in turn; 0 or 1 is one job; default the CONFORMANCE_MAX_PARALLEL variable, else 10
         required: false
 
 permissions:
@@ -22,14 +22,13 @@ concurrency:
 env:
   PLAN: oidcc-test-plan
   CONFIG: configs/oidc.to.mjs
-  MAX_PARALLEL: ${{ inputs.max_parallel || vars.CONFORMANCE_MAX_PARALLEL || '256' }}
+  MAX_PARALLEL: ${{ inputs.max_parallel || vars.CONFORMANCE_MAX_PARALLEL || '10' }}
 
 jobs:
   variants:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.variants.outputs.matrix }}
-      max-parallel: ${{ steps.variants.outputs.max-parallel }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -39,38 +38,32 @@ jobs:
       - run: npm ci --omit=dev --no-audit --no-fund
       # The same entry the action restores, filled here when cold so the matrix starts warm.
       - id: cache-key
-        if: env.MAX_PARALLEL != '0'
         run: |
           tag=$(node --input-type=module -e 'console.log((await import("./src/suite.mjs")).tag)')
           echo "key=oidc-conformance-${{ runner.os }}-${{ runner.arch }}-$tag-$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-      - if: env.MAX_PARALLEL != '0'
-        uses: actions/cache@v6
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cache/oidc-conformance
             ~/.cache/pip
             ~/.cache/ms-playwright
           key: ${{ steps.cache-key.outputs.key }}
-      # 0 is one job with no variant filter, which runs them all in turn.
+      # As many jobs as MAX_PARALLEL, so as many suite tunnels open at once and per run.
       - id: variants
-        run: |
-          if [ "$MAX_PARALLEL" = 0 ]; then
-            jq -cn --arg name "$PLAN: every variant" '"matrix=" + ([{variant: "", name: $name}] | tojson)' -r >> "$GITHUB_OUTPUT"
-            echo "max-parallel=1" >> "$GITHUB_OUTPUT"
-          else
-            CONFORMANCE_CACHE="$HOME/.cache/oidc-conformance" node bin/oidc-conformance.mjs variants --plan "$PLAN"
-            echo "max-parallel=$MAX_PARALLEL" >> "$GITHUB_OUTPUT"
-          fi
+        run: CONFORMANCE_CACHE="$HOME/.cache/oidc-conformance" node bin/oidc-conformance.mjs variants --plan "$PLAN" --jobs "$MAX_PARALLEL"
 
   conformance:
     needs: variants
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     # GitHub-hosted jobs stop at 6 hours.
-    timeout-minutes: ${{ matrix.variant == '' && 360 || 120 }}
+    timeout-minutes: 360
+    # The identity token is then an OIDC JWT, not the job's runtime token.
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(needs.variants.outputs.max-parallel) }}
       matrix:
         include: ${{ fromJSON(needs.variants.outputs.matrix) }}
     steps:
@@ -79,7 +72,13 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
+      - name: identity
+        id: identity
+        uses: cnuss/actions-identity@v1
       - uses: ./
+        env:
+          # Names this run to tunnel.pizza for the suite's tunnel.
+          LIBTUNNEL_TOKEN: ${{ steps.identity.outputs.token }}
         with:
           issuer: ${{ inputs.issuer }}
           plan: ${{ env.PLAN }}

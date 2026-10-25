@@ -10,6 +10,7 @@ import {
   defaultPlan,
   findPlan,
   formatVariant,
+  chunks,
   matchingVariants,
   parseVariant,
   rotateKeys,
@@ -25,13 +26,15 @@ Usage:
   oidc-conformance [options] <issuer>            an OP already running at a public https issuer
   oidc-conformance [options] <command...>        a command that starts the OP and prints its https origin
   oidc-conformance [options]                     the config's command
-  oidc-conformance variants [--plan] [--variant] the plan's variants, as a GitHub Actions matrix
+  oidc-conformance variants [--plan] [--variant] [--jobs n]
+                                                 the plan's variants as a GitHub Actions matrix,
+                                                 in n jobs; default one job per variant
   oidc-conformance merge [--out dir] <summary.json...>
 
 Options:
   --config <file>        default conformance.config.mjs in the working directory
   --plan <name>          default ${defaultPlan}; CONFORMANCE_PLAN
-  --variant <axis=value,...>  only the variants matching each; CONFORMANCE_VARIANT
+  --variant <axis=value,...;...>  only the variants matching each pair of any group; CONFORMANCE_VARIANT
   --modules <module,...> only these modules; CONFORMANCE_MODULES
   --issuer <url>         the issuer, for a command that does not print it
   --out <dir>            merge's output directory, default .conformance/results
@@ -40,7 +43,7 @@ With none of --plan, --variant or --modules in a terminal, it asks.
 Exits 0 when every plan ran, however many modules failed.
 `;
 
-const options = ["config", "plan", "variant", "modules", "issuer", "out"];
+const options = ["config", "plan", "variant", "modules", "issuer", "out", "jobs"];
 
 // Options come first; the first word that is not one starts the target, which is the rest.
 export function parseArgs(argv) {
@@ -149,10 +152,21 @@ async function mergeCommand(args) {
 }
 
 async function variantsCommand(args) {
+  const jobs = args.jobs === undefined ? Infinity : Number(args.jobs);
+  if (jobs !== Infinity && (!Number.isInteger(jobs) || jobs < 0)) {
+    throw new UsageError(`--jobs ${args.jobs} is not a whole number`);
+  }
   lock();
   const plan = findPlan(await suite.catalogue(), args.plan || defaultPlan);
   const runs = matchingVariants(plan, parseVariant(args.variant));
-  const matrix = runs.map((variant) => ({ variant: formatVariant(variant), name: Object.values(variant).join(" · ") }));
+  // Each job is one suite and one tunnel, running its variants in turn.
+  const matrix = chunks(runs, Math.min(Math.max(jobs, 1), runs.length)).map((group, index, all) => ({
+    variant: group.map(formatVariant).join(";"),
+    name:
+      group.length === 1
+        ? Object.values(group[0]).join(" · ")
+        : `${index + 1}/${all.length}: ${group.length} variants`,
+  }));
   setOutput("matrix", JSON.stringify(matrix));
   console.log(JSON.stringify(matrix, null, 2));
 }

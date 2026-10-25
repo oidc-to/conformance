@@ -12,7 +12,7 @@ inputs:
     description: Test plan to run, every variant of it
     default: oidcc-test-plan
   variant:
-    description: Only the variants matching each comma-separated axis=value
+    description: Only the variants matching each comma-separated axis=value of any ";"-separated group
     default: ""
   modules:
     description: Only these test modules, comma separated

@@ -26,14 +26,20 @@ export function everyVariant({ variants }) {
   );
 }
 
-// "axis=value,axis=value", as CONFORMANCE_VARIANT and --variant take it.
+// "axis=value,axis=value;axis=value", as CONFORMANCE_VARIANT and --variant take it: a filter per
+// ";"-separated group.
 export function parseVariant(text = "") {
-  return Object.fromEntries(
-    text
-      .split(",")
-      .filter(Boolean)
-      .map((pair) => pair.split("=").map((part) => part.trim())),
-  );
+  return text
+    .split(";")
+    .filter((group) => group.trim())
+    .map((group) =>
+      Object.fromEntries(
+        group
+          .split(",")
+          .filter(Boolean)
+          .map((pair) => pair.split("=").map((part) => part.trim())),
+      ),
+    );
 }
 
 export function formatVariant(variant) {
@@ -42,10 +48,18 @@ export function formatVariant(variant) {
     .join(",");
 }
 
-// The variants of a plan matching every axis=value in filter.
-export function matchingVariants(plan, filter) {
-  const wanted = Object.entries(filter);
-  return everyVariant(plan).filter((variant) => wanted.every(([axis, value]) => variant[axis] === value));
+// The variants of a plan matching every axis=value of any filter; every variant without one.
+export function matchingVariants(plan, filters) {
+  if (!filters.length) return everyVariant(plan);
+  return everyVariant(plan).filter((variant) =>
+    filters.some((filter) => Object.entries(filter).every(([axis, value]) => variant[axis] === value)),
+  );
+}
+
+// items in n runs of consecutive items, their lengths differing by at most one.
+export function chunks(items, n) {
+  const size = items.length / n;
+  return Array.from({ length: n }, (_, i) => items.slice(Math.round(i * size), Math.round((i + 1) * size)));
 }
 
 export function planName(name, variant, modules) {
