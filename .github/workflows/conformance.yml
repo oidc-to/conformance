@@ -8,6 +8,9 @@ on:
         description: The deployed oidc.to's issuer
         required: true
         default: https://oidc.to.scaffoldly.dev
+      max_parallel:
+        description: Matrix jobs run at once; default the CONFORMANCE_MAX_PARALLEL variable, else 256
+        required: false
 
 permissions:
   contents: read
@@ -42,8 +45,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      # The repository variable CONFORMANCE_MAX_PARALLEL caps how many variants run at once.
-      max-parallel: ${{ fromJSON(vars.CONFORMANCE_MAX_PARALLEL || '256') }}
+      max-parallel: ${{ fromJSON(inputs.max_parallel || vars.CONFORMANCE_MAX_PARALLEL || '256') }}
       matrix:
         include: ${{ fromJSON(needs.variants.outputs.matrix) }}
     steps:

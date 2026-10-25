@@ -9,9 +9,27 @@ const require = createRequire(import.meta.url);
 
 export const userAgent = `oidc-conformance/${require("../package.json").version} (+https://github.com/oidc-to/conformance)`;
 
-// fetch, naming this runner.
-export function request(url, options = {}) {
-  return fetch(url, { ...options, headers: { "User-Agent": userAgent, ...options.headers } });
+const throttled = [429, 503];
+
+// Seconds to wait from a Retry-After of seconds or an HTTP date.
+function retryAfter(header) {
+  if (!header) return;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(seconds, 0);
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.max((date - Date.now()) / 1000, 0);
+}
+
+// fetch, naming this runner. A throttled response is retried after its Retry-After, else with backoff.
+export async function request(url, options = {}, { attempts = 6, maxWait = 60 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(url, { ...options, headers: { "User-Agent": userAgent, ...options.headers } });
+    if (!throttled.includes(res.status) || attempt === attempts) return res;
+    const wait = Math.min(retryAfter(res.headers.get("retry-after")) ?? 2 ** attempt, maxWait);
+    await res.body?.cancel();
+    console.warn(`${res.status} from ${options.method ?? "GET"} ${url}; retrying in ${wait}s`);
+    await sleep(wait * 1000);
+  }
 }
 
 export function run(command, args, options = {}) {

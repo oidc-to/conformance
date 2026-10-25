@@ -161,6 +161,31 @@ test("requests name the runner and its version", async () => {
   }
 });
 
+test("throttled requests are retried after Retry-After, then given up on", async () => {
+  const { createServer } = await import("node:http");
+  let calls = 0;
+  const server = createServer((req, res) => {
+    calls++;
+    if (req.url === "/once" && calls > 1) return res.end("ok");
+    res.writeHead(calls % 2 ? 429 : 503, { "Retry-After": "0" }).end();
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const res = await request(`${base}/once`, { method: "POST", body: "{}" });
+    assert.equal(await res.text(), "ok");
+    assert.equal(calls, 2);
+    calls = 0;
+    assert.equal((await request(`${base}/always`, {}, { attempts: 3 })).status, 429);
+    assert.equal(calls, 3);
+  } finally {
+    console.warn = warn;
+    server.close();
+  }
+});
+
 test("the config's command is the target only when the command line gives none", async () => {
   const remotes = [];
   const loaded = ({ remote }) => (remotes.push(remote), { command: "npm run dev", rotateKeys: remote ? undefined : () => {} });
