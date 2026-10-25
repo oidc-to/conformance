@@ -18,6 +18,9 @@
     "src",
     "action.yml"
   ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "engines": {
     "node": ">=22"
   },
