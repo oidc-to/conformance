@@ -46,7 +46,10 @@ runs:
 
     - shell: bash
       working-directory: ${{ github.action_path }}
-      run: node "$(dirname "$(node -p 'require.resolve("playwright/package.json")')")/cli.js" install --with-deps chromium
+      # GitHub's runner images have Chrome, which the renderer falls back to.
+      run: |
+        command -v google-chrome && exit
+        node "$(dirname "$(node -p 'require.resolve("playwright/package.json")')")/cli.js" install --with-deps --only-shell chromium
 
     - id: run
       shell: bash

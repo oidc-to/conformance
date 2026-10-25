@@ -5,10 +5,12 @@ import { chromium } from "playwright";
 import { planName, rotateKeys } from "./plans.mjs";
 import { poll, request, step } from "./process.mjs";
 
-// Renders the pages the suite's browser was served, for REVIEW screenshot slots.
+// Renders the pages the suite's browser was served, for REVIEW screenshot slots. Playwright's
+// Chromium, else an installed Chrome.
 export async function startRenderer() {
   return chromium
     .launch()
+    .catch(() => chromium.launch({ channel: "chrome" }))
     .then((browser) => browser.newContext({ javaScriptEnabled: false }))
     .catch((error) => {
       console.error(`Screenshots fall back to page source; Chromium did not start: ${error.message}`);

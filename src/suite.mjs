@@ -70,6 +70,9 @@ export class Suite {
     for (const [name, url] of Object.entries(files)) {
       await run("curl", ["-fsSLo", join(this.dir, name), url]);
     }
+  }
+
+  async install() {
     step("Installing runner requirements…");
     if (!existsSync(this.venv)) await run("python3", ["-m", "venv", this.venv]);
     await run(join(this.venv, "bin/pip"), [
@@ -85,6 +88,10 @@ export class Suite {
   // the request_uri, sector_identifier_uri and jwks_uri documents it hosts.
   async start({ publish }) {
     await this.download();
+    // The images pull while the runner installs and the tunnel opens.
+    const pulled = this.pull();
+    pulled.catch(() => {});
+    await this.install();
     await this.removeLeftovers();
     this.ports = { server: await freePort(), nginx: await freePort() };
     if (publish) {
@@ -108,6 +115,8 @@ export class Suite {
       `      - "127.0.0.1:${this.ports.server}:8080"`,
     ];
     writeFileSync(join(this.dir, "compose.override.yml"), `${override.join("\n")}\n`);
+    step("Waiting for the suite's images…");
+    await pulled;
     step(`Starting the suite (docker compose -p ${this.project})…`);
     this.started = true;
     await this.compose("up", "-d");
@@ -125,19 +134,20 @@ export class Suite {
   async stop() {
     if (!this.started) return;
     step("Stopping the suite…");
-    return this.compose("down", "-v");
+    // The server ignores SIGTERM, and the volumes go with it.
+    return this.compose("down", "-v", "-t", "1");
+  }
+
+  pull() {
+    step("Pulling the suite's images…");
+    return this.compose(["docker-compose-prebuilt.yml"], "pull", "-q");
   }
 
   compose(...args) {
+    const files = Array.isArray(args[0]) ? args.shift() : ["docker-compose-prebuilt.yml", "compose.override.yml"];
     return run(
       "docker",
-      [
-        "compose",
-        "-p",
-        this.project,
-        ...["docker-compose-prebuilt.yml", "compose.override.yml"].flatMap((file) => ["-f", join(this.dir, file)]),
-        ...args,
-      ],
+      ["compose", "-p", this.project, ...files.flatMap((file) => ["-f", join(this.dir, file)]), ...args],
       { env: { ...process.env, IMAGE_TAG: tag, BASE_URL: this.url } },
     );
   }
