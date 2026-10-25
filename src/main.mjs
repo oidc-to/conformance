@@ -24,6 +24,7 @@ const usage = `Runs an OpenID Foundation conformance suite test plan, every vari
 Usage:
   oidc-conformance [options] <issuer>            an OP already running at a public https issuer
   oidc-conformance [options] <command...>        a command that starts the OP and prints its https origin
+  oidc-conformance [options]                     the config's command
   oidc-conformance variants [--plan] [--variant] the plan's variants, as a GitHub Actions matrix
   oidc-conformance merge [--out dir] <summary.json...>
 
@@ -70,6 +71,20 @@ export function parseArgs(argv) {
     return { ...parsed, ...rest, command: first, target: rest.target };
   }
   return parsed;
+}
+
+export class UsageError extends Error {}
+
+// The target from the command line, else the config's command, with the config for it.
+export async function resolveTarget(words, loaded) {
+  const configFor = async (remote) => (typeof loaded === "function" ? await loaded({ remote }) : loaded);
+  if (words.length) {
+    const target = targetOf(words);
+    return { target, config: await configFor(Boolean(target.issuer)) };
+  }
+  const config = await configFor(false);
+  if (!config.command) throw new UsageError("give an issuer or a command, or set command in the config");
+  return { target: { command: [config.command].flat() }, config };
 }
 
 // An issuer is a lone URL; anything else is a command.
@@ -144,10 +159,9 @@ async function startOp(target, args) {
 }
 
 async function runCommand(args) {
-  const target = targetOf(args.target);
-  const remote = Boolean(target.issuer);
   const loaded = await loadConfig(args.config ?? process.env.CONFORMANCE_CONFIG);
-  const config = typeof loaded === "function" ? await loaded({ remote }) : loaded;
+  const { target, config } = await resolveTarget(args.target, loaded);
+  const remote = Boolean(target.issuer);
   const env = {
     plan: args.plan ?? process.env.CONFORMANCE_PLAN,
     variant: args.variant ?? process.env.CONFORMANCE_VARIANT,
@@ -241,9 +255,9 @@ export async function main(argv) {
     console.error(`${error.message}\n\n${usage}`);
     return 2;
   }
-  if (args.help || (!args.command && !args.target.length)) {
-    (args.help ? console.log : console.error)(usage);
-    return args.help ? 0 : 2;
+  if (args.help) {
+    console.log(usage);
+    return 0;
   }
   if (args.command === "merge") {
     await mergeCommand(args);
@@ -264,6 +278,9 @@ export async function main(argv) {
   } catch (error) {
     if (error instanceof Cancelled) {
       code = 130;
+    } else if (error instanceof UsageError) {
+      console.error(`${error.message}\n\n${usage}`);
+      code = 2;
     } else {
       console.error(error);
       code = 1;

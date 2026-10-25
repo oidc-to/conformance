@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Clients, suiteConfig } from "../src/config.mjs";
-import { parseArgs, targetOf } from "../src/main.mjs";
+import { parseArgs, resolveTarget, targetOf, UsageError } from "../src/main.mjs";
 import { combinations, formatVariant, matchingVariants, parseVariant, planName } from "../src/plans.mjs";
 import { children, request, startAnnouncing, userAgent } from "../src/process.mjs";
 import { merge, summarize } from "../src/summary.mjs";
@@ -159,4 +159,16 @@ test("requests name the runner and its version", async () => {
   } finally {
     server.close();
   }
+});
+
+test("the config's command is the target only when the command line gives none", async () => {
+  const remotes = [];
+  const loaded = ({ remote }) => (remotes.push(remote), { command: "npm run dev", rotateKeys: remote ? undefined : () => {} });
+  assert.deepEqual((await resolveTarget([], loaded)).target, { command: ["npm run dev"] });
+  assert.ok((await resolveTarget([], loaded)).config.rotateKeys);
+  assert.deepEqual((await resolveTarget(["https://op.example"], loaded)).target, { issuer: "https://op.example" });
+  assert.deepEqual((await resolveTarget(["next", "dev"], loaded)).target, { command: ["next", "dev"] });
+  assert.deepEqual(remotes, [false, false, true, false]);
+  assert.deepEqual((await resolveTarget([], { command: ["npm", "run", "dev"] })).target, { command: ["npm", "run", "dev"] });
+  await assert.rejects(resolveTarget([], {}), UsageError);
 });

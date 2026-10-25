@@ -63,6 +63,7 @@ export class Suite {
     }
     writeFileSync(join(this.dir, "compose.override.yml"), `${override.join("\n")}\n`);
     step("Starting the suite (docker compose)…");
+    this.started = true;
     await this.compose("up", "-d");
     step("Waiting for the suite…");
     await poll("the conformance suite", 300, async () => this.status("runner/available") === "200");
@@ -75,7 +76,8 @@ export class Suite {
     step("Suite ready");
   }
 
-  stop() {
+  async stop() {
+    if (!this.started) return;
     step("Stopping the suite…");
     return this.compose("down", "-v");
   }

@@ -49,6 +49,11 @@ It exits 0 when every plan ran, however many modules failed.
 
 ```js
 export default ({ remote }) => ({
+  // Starts the OP when the command line gives no issuer or command: a string runs in the shell,
+  // an array is argv. Plain `npm run conformance` then runs it, and `npm run conformance -- --plan x`
+  // and `npm run conformance -- https://op.example.com` still work.
+  command: "npm run dev",
+
   // The suite's alias for this OP; redirect URIs are `${suite}/test/a/${alias}/callback`.
   alias: "my-op",
 
@@ -134,6 +139,7 @@ It uses [`configs/oidc.to.mjs`](configs/oidc.to.mjs), which has oidc.to's sign-i
 ```text
 oidc-conformance [options] <issuer>
 oidc-conformance [options] <command...>
+oidc-conformance [options]                          # the config's command
 oidc-conformance variants [--plan] [--variant]      # JSON matrix; sets the matrix output in Actions
 oidc-conformance merge [--out dir] <summary.json...>
 ```
