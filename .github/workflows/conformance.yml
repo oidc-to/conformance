@@ -35,8 +35,20 @@ jobs:
           node-version: lts/*
           cache: npm
       - run: npm ci --omit=dev --no-audit --no-fund
+      # The same entry the action restores, filled here when cold so the matrix starts warm.
+      - id: cache-key
+        run: |
+          tag=$(node --input-type=module -e 'console.log((await import("./src/suite.mjs")).tag)')
+          echo "key=oidc-conformance-${{ runner.os }}-${{ runner.arch }}-$tag-$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/oidc-conformance
+            ~/.cache/pip
+            ~/.cache/ms-playwright
+          key: ${{ steps.cache-key.outputs.key }}
       - id: variants
-        run: node bin/oidc-conformance.mjs variants --plan "$PLAN"
+        run: CONFORMANCE_CACHE="$HOME/.cache/oidc-conformance" node bin/oidc-conformance.mjs variants --plan "$PLAN"
 
   conformance:
     needs: variants

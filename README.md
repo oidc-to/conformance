@@ -112,7 +112,7 @@ The context includes:
 - uses: oidc-to/conformance@main
   with:
     issuer: https://op.example.com
-    # plan, variant, modules, config, image-tag, working-directory
+    # plan, variant, modules, config, image-tag, working-directory, cache
 - uses: actions/upload-artifact@v7
   if: always()
   with:
@@ -124,6 +124,8 @@ The context includes:
 
 The variants run one after another, so a plan with many variants needs a long `timeout-minutes`.
 
+With `cache` (the default), the action keeps the suite's images, its plan catalogue, pip's downloads and Playwright's browser in GitHub's cache, one entry per suite release and package version. The first run fills it. The CLI reads and writes the same files in the directory named by `CONFORMANCE_CACHE`. Without it, nothing is cached.
+
 ### Against a deployed oidc.to
 
 This repository's [Conformance](.github/workflows/conformance.yml) workflow runs `oidcc-test-plan` against the issuer you give it, one job per variant, and merges the results into one table. Start it from the Actions tab or with:
@@ -132,7 +134,7 @@ This repository's [Conformance](.github/workflows/conformance.yml) workflow runs
 gh workflow run conformance.yml -R oidc-to/conformance -f issuer=https://oidc.to.scaffoldly.dev -f max_parallel=2
 ```
 
-It uses [`configs/oidc.to.mjs`](configs/oidc.to.mjs), which has oidc.to's sign-in automation and no keys. Every client is registered dynamically, and `oidcc-server-rotate-keys` is skipped. `max_parallel` caps how many variants run at once; without it, the `CONFORMANCE_MAX_PARALLEL` repository variable does, else 256. The uploaded artifacts leave out the suite's exported plans, because those contain client secrets and private keys.
+The variants job fills the cache when it is cold, so every matrix job loads the images from it and none pulls them. It uses [`configs/oidc.to.mjs`](configs/oidc.to.mjs), which has oidc.to's sign-in automation and no keys. Every client is registered dynamically, and `oidcc-server-rotate-keys` is skipped. `max_parallel` caps how many variants run at once; without it, the `CONFORMANCE_MAX_PARALLEL` repository variable does, else 256. The uploaded artifacts leave out the suite's exported plans, because those contain client secrets and private keys.
 
 The runner retries its own requests to the OP (discovery, registration, the JWKS) when they get a 429 or 503, after the Retry-After. The suite's requests during a module are not retried, so a throttled OP fails that module; lower `max_parallel` instead.
 

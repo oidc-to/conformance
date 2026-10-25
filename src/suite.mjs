@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { alive, deadline, poll, request, run, step, tunnel } from "./process.mjs";
 
 export const tag = process.env.CONFORMANCE_IMAGE_TAG || "release-v5.3.3";
+// Kept between runs, as GitHub's cache does: the plan catalogue and the images, per tag.
+const cacheDir = process.env.CONFORMANCE_CACHE;
 // The suite's default base URL: its nginx, which resolves to 127.0.0.1 and is not published here.
 const unpublished = "https://localhost.emobix.co.uk:8443";
 // A project per run, named for the runner's pid so a later run can tell a crashed one's leftovers.
@@ -87,10 +89,16 @@ export class Suite {
   // Starts the suite. With publish, it is on a public https address first, so the OP can fetch
   // the request_uri, sector_identifier_uri and jwks_uri documents it hosts.
   async start({ publish }) {
+    await this.open({ publish });
+    return this.boot();
+  }
+
+  // Everything up to starting the containers, which need the suite's public address.
+  async open({ publish }) {
     await this.download();
-    // The images pull while the runner installs and the tunnel opens.
-    const pulled = this.pull();
-    pulled.catch(() => {});
+    // The images arrive while the runner installs and the tunnel opens.
+    this.pulled = this.images();
+    this.pulled.catch(() => {});
     await this.install();
     await this.removeLeftovers();
     this.ports = { server: await freePort(), nginx: await freePort() };
@@ -101,46 +109,88 @@ export class Suite {
       ({ origin: this.public } = await deadline(tunnel(origin), "the suite's tunnel", 120));
       step(`Suite tunnel: ${this.public}`);
     }
-    const override = [
-      "services:",
-      // Mongo's bind-mounted data dir fails to reopen on macOS; each run starts empty.
-      "  mongodb:",
-      "    volumes: !reset []",
-      // Fixed host ports would collide with another run's.
-      "  nginx:",
-      "    ports: !override",
-      `      - "127.0.0.1:${this.ports.nginx}:8443"`,
-      "  server:",
-      "    ports:",
-      `      - "127.0.0.1:${this.ports.server}:8080"`,
-    ];
-    writeFileSync(join(this.dir, "compose.override.yml"), `${override.join("\n")}\n`);
-    step("Waiting for the suite's images…");
-    await pulled;
-    step(`Starting the suite (docker compose -p ${this.project})…`);
-    this.started = true;
-    await this.compose("up", "-d");
-    step("Waiting for the suite…");
-    await poll("the conformance suite", 300, async () => this.status("runner/available") === "200");
-    if (publish) {
-      await poll("the conformance suite through its tunnel", 120, async () => {
-        const res = await request(`${this.public}/api/runner/available`);
-        return res.ok;
-      });
+    this.publish = publish;
+  }
+
+  // Starts the containers once, resolving when the suite answers.
+  boot() {
+    this.booted ??= (async () => {
+      const override = [
+        "services:",
+        // Mongo's bind-mounted data dir fails to reopen on macOS; each run starts empty.
+        "  mongodb:",
+        "    volumes: !reset []",
+        // Fixed host ports would collide with another run's.
+        "  nginx:",
+        "    ports: !override",
+        `      - "127.0.0.1:${this.ports.nginx}:8443"`,
+        "  server:",
+        "    ports:",
+        `      - "127.0.0.1:${this.ports.server}:8080"`,
+      ];
+      writeFileSync(join(this.dir, "compose.override.yml"), `${override.join("\n")}\n`);
+      step("Waiting for the suite's images…");
+      await this.pulled;
+      step(`Starting the suite (docker compose -p ${this.project})…`);
+      this.started = true;
+      await this.compose("up", "-d");
+      step("Waiting for the suite…");
+      await poll("the conformance suite", 300, async () => this.status("runner/available") === "200");
+      if (this.publish) {
+        await poll("the conformance suite through its tunnel", 120, async () => {
+          const res = await request(`${this.public}/api/runner/available`);
+          return res.ok;
+        });
+      }
+      step("Suite ready");
+    })();
+    return this.booted;
+  }
+
+  // Every plan as /api/plan/available lists it, from the cache when it has this tag's.
+  async catalogue() {
+    const file = cacheDir && join(cacheDir, `catalogue-${tag}.json`);
+    if (file && existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
+    await (this.booted ?? this.start({ publish: false }));
+    const catalogue = this.get("plan/available");
+    if (file) {
+      mkdirSync(cacheDir, { recursive: true });
+      writeFileSync(file, JSON.stringify(catalogue));
     }
-    step("Suite ready");
+    return catalogue;
   }
 
   async stop() {
+    await this.saving?.catch((error) => console.error(`The suite's images were not cached: ${error.message}`));
     if (!this.started) return;
     step("Stopping the suite…");
     // The server ignores SIGTERM, and the volumes go with it.
     return this.compose("down", "-v", "-t", "1");
   }
 
-  pull() {
+  // The images from the cache, else pulled and, with a cache, saved to it.
+  async images() {
+    const file = cacheDir && join(cacheDir, `images-${tag}.tar`);
+    if (file && existsSync(file)) {
+      step("Loading the suite's images from the cache…");
+      return run("docker", ["load", "-q", "-i", file]);
+    }
     step("Pulling the suite's images…");
-    return this.compose(["docker-compose-prebuilt.yml"], "pull", "-q");
+    await this.compose(["docker-compose-prebuilt.yml"], "pull", "-q");
+    if (file) this.saving = this.saveImages(file);
+  }
+
+  async saveImages(file) {
+    const images = execFileSync(
+      "docker",
+      ["compose", "-f", join(this.dir, "docker-compose-prebuilt.yml"), "config", "--images"],
+      { encoding: "utf8", env: { ...process.env, IMAGE_TAG: tag, BASE_URL: this.url } },
+    )
+      .split("\n")
+      .filter(Boolean);
+    mkdirSync(cacheDir, { recursive: true });
+    await run("docker", ["save", "-o", `${file}.partial`, ...images]);
+    renameSync(`${file}.partial`, file);
   }
 
   compose(...args) {

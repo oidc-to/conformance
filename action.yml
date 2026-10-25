@@ -26,6 +26,9 @@ inputs:
   working-directory:
     description: Where the config is and .conformance/results is written
     default: .
+  cache:
+    description: Keep the suite's images, plan catalogue, pip downloads and Playwright's browser in GitHub's cache
+    default: "true"
 
 outputs:
   results:
@@ -35,6 +38,25 @@ outputs:
 runs:
   using: composite
   steps:
+    - id: cache-key
+      if: inputs.cache == 'true'
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        CONFORMANCE_IMAGE_TAG: ${{ inputs.image-tag }}
+      run: |
+        tag=$(node --input-type=module -e 'console.log((await import("./src/suite.mjs")).tag)')
+        echo "key=oidc-conformance-${{ runner.os }}-${{ runner.arch }}-$tag-$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+    - if: inputs.cache == 'true'
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cache/oidc-conformance
+          ~/.cache/pip
+          ~/.cache/ms-playwright
+        key: ${{ steps.cache-key.outputs.key }}
+
     - uses: actions/setup-python@v7
       with:
         python-version: "3.x"
@@ -61,6 +83,8 @@ runs:
         CONFORMANCE_CONFIG: ${{ inputs.config }}
         CONFORMANCE_IMAGE_TAG: ${{ inputs.image-tag }}
         ISSUER: ${{ inputs.issuer }}
+        CACHE: ${{ inputs.cache }}
       run: |
+        if [ "$CACHE" = true ]; then export CONFORMANCE_CACHE="$HOME/.cache/oidc-conformance"; fi
         echo "results=$PWD/.conformance/results" >> "$GITHUB_OUTPUT"
         node "$GITHUB_ACTION_PATH/bin/oidc-conformance.mjs" "$ISSUER"

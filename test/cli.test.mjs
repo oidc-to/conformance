@@ -130,6 +130,32 @@ test("the suite config takes clients, browser tasks and overrides from the confi
   assert.deepEqual(result.override, { m: {} });
 });
 
+test("a client is registered once per run for each name and method", async () => {
+  const { createServer } = await import("node:http");
+  const bodies = [];
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    bodies.push(JSON.parse(body));
+    res.writeHead(201).end(JSON.stringify({ client_id: `id-${bodies.length}` }));
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  try {
+    const discovery = { issuer: "https://op.example", registration_endpoint: `http://127.0.0.1:${server.address().port}/` };
+    const options = { config: {}, clients: new Clients(), issuer: "https://op.example", suite: "https://suite.example", discovery };
+    const one = await suiteConfig({ ...options, variant: { client_auth_type: "client_secret_post" } });
+    const two = await suiteConfig({ ...options, variant: { client_auth_type: "client_secret_post", response_type: "code" } });
+    assert.deepEqual(bodies.map(({ client_name, token_endpoint_auth_method }) => [client_name, token_endpoint_auth_method]), [
+      ["conformance client", "client_secret_post"],
+      ["conformance client2", "client_secret_post"],
+    ]);
+    assert.equal(one.client_secret_post.client_id, one.client.client_id);
+    assert.equal(two.client2.client_id, "id-2");
+  } finally {
+    server.close();
+  }
+});
+
 test("deadline hints once, then gives up", async () => {
   const { deadline } = await import("../src/process.mjs");
   const warnings = [];

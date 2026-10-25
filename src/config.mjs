@@ -32,6 +32,7 @@ function signingKey(kid) {
 export class Clients {
   constructor() {
     this.keys = new Map();
+    this.registered = new Map();
   }
 
   // The private key the suite signs with as this client, the same for every variant of a run.
@@ -40,8 +41,18 @@ export class Clients {
     return this.keys.get(name);
   }
 
-  // A client registered at the OP's registration_endpoint.
-  async register({ name, method, discovery, alias, callback, key = this.key(name) }) {
+  // A client registered at the OP's registration_endpoint, once per run for each name, method and key.
+  register({ name, method, discovery, alias, callback, key = this.key(name) }) {
+    const id = JSON.stringify([name, method, discovery.registration_endpoint, alias, callback, key]);
+    if (!this.registered.has(id)) {
+      const registering = this.#register({ name, method, discovery, alias, callback, key });
+      registering.catch(() => this.registered.delete(id));
+      this.registered.set(id, registering);
+    }
+    return this.registered.get(id);
+  }
+
+  async #register({ name, method, discovery, alias, callback, key }) {
     if (!discovery.registration_endpoint) {
       throw new Error("the OP has no registration_endpoint; give the config a client function");
     }

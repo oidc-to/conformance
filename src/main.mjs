@@ -150,8 +150,7 @@ async function mergeCommand(args) {
 
 async function variantsCommand(args) {
   lock();
-  await suite.start({ publish: false });
-  const plan = findPlan(suite.get("plan/available"), args.plan || defaultPlan);
+  const plan = findPlan(await suite.catalogue(), args.plan || defaultPlan);
   const runs = matchingVariants(plan, parseVariant(args.variant));
   const matrix = runs.map((variant) => ({ variant: formatVariant(variant), name: Object.values(variant).join(" · ") }));
   setOutput("matrix", JSON.stringify(matrix));
@@ -192,54 +191,65 @@ async function runCommand(args) {
   lock();
   rmSync(resultsDir, { recursive: true, force: true });
   mkdirSync(resultsDir, { recursive: true });
-  await suite.start({ publish: true });
-  // Every plan with its variants and modules.
-  const catalogue = suite.get("plan/available");
-  let plan;
-  let runs;
-  let modules = (env.modules || "").split(",").filter(Boolean);
-  if (interactive) {
-    plan = await choosePlan(catalogue, tag);
-    runs = await chooseVariants(plan);
-    modules = await chooseModules(plan, runs.length);
-    outro("Starting the run.");
-  } else {
-    plan = findPlan(catalogue, env.plan || defaultPlan);
-    runs = matchingVariants(plan, parseVariant(env.variant));
-    if (!runs.length) throw new Error(`no ${plan.planName} variant matches ${env.variant}`);
-  }
+  await suite.open({ publish: true });
+  const booted = suite.boot();
+  // Prompts would be drawn over the suite's output.
+  if (interactive) await booted;
+  // Everything up to running the plans happens while the suite boots, unless it fails first.
+  const prepared = (async () => {
+    const catalogue = await suite.catalogue();
+    let plan;
+    let runs;
+    let modules = (env.modules || "").split(",").filter(Boolean);
+    if (interactive) {
+      plan = await choosePlan(catalogue, tag);
+      runs = await chooseVariants(plan);
+      modules = await chooseModules(plan, runs.length);
+      outro("Starting the run.");
+    } else {
+      plan = findPlan(catalogue, env.plan || defaultPlan);
+      runs = matchingVariants(plan, parseVariant(env.variant));
+      if (!runs.length) throw new Error(`no ${plan.planName} variant matches ${env.variant}`);
+    }
 
-  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
-  step(`Plan ${plan.planName}: ${count(runs.length, "variant")}, ${count(modules.length || plan.modules.length, "module")}`);
-  const issuer = await startOp(target, args);
-  step(`Issuer: ${issuer}`);
-  step(`Waiting for ${issuer}/.well-known/openid-configuration…`);
-  const discovery = await poll("discovery", 300, async () => {
-    const res = await request(`${issuer}/.well-known/openid-configuration`);
-    return res.ok && res.json();
-  });
+    const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+    step(`Plan ${plan.planName}: ${count(runs.length, "variant")}, ${count(modules.length || plan.modules.length, "module")}`);
+    const issuer = await startOp(target, args);
+    step(`Issuer: ${issuer}`);
+    step(`Waiting for ${issuer}/.well-known/openid-configuration…`);
+    const discovery = await poll("discovery", 300, async () => {
+      const res = await request(`${issuer}/.well-known/openid-configuration`);
+      return res.ok && res.json();
+    });
 
-  renderer = await startRenderer();
-  if (!config.browser) console.warn("The config has no browser tasks: every module waits for a person to sign in.");
-  step(`Writing ${runs.length === 1 ? "the suite config" : `${runs.length} suite configs`}…`);
-  const clients = new Clients();
-  // One at a time: concurrent registrations can each land on a different instance of an OP
-  // that keeps its clients in memory.
-  const configs = [];
-  for (const [index, variant] of runs.entries()) {
-    configs.push(
-      await writeSuiteConfig(work, index, {
-        config,
-        clients,
-        issuer,
-        suite: suite.url,
-        discovery,
-        variant,
-        remote,
-        rendering: Boolean(renderer),
-      }),
-    );
-  }
+    renderer = await startRenderer();
+    if (!config.browser) console.warn("The config has no browser tasks: every module waits for a person to sign in.");
+    step(`Writing ${runs.length === 1 ? "the suite config" : `${runs.length} suite configs`}…`);
+    const clients = new Clients();
+    // One at a time: concurrent registrations can each land on a different instance of an OP
+    // that keeps its clients in memory.
+    const configs = [];
+    for (const [index, variant] of runs.entries()) {
+      configs.push(
+        await writeSuiteConfig(work, index, {
+          config,
+          clients,
+          issuer,
+          suite: suite.url,
+          discovery,
+          variant,
+          remote,
+          rendering: Boolean(renderer),
+        }),
+      );
+    }
+    return { plan, runs, modules, issuer, discovery, configs };
+  })();
+  const { plan, runs, modules, issuer, discovery, configs } = await Promise.race([
+    prepared,
+    booted.then(() => new Promise(() => {})),
+  ]);
+  await booted;
 
   const collector = new Collector(suite, resultsDir, plan.planName, tag);
   const runner = new Runner({ suite, venv: suite.venv, resultsDir, collector, renderer, issuer });
