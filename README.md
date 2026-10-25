@@ -2,9 +2,18 @@
 
 Runs an [OpenID Foundation conformance suite](https://gitlab.com/openid/conformance-suite) test plan against an OpenID Provider, with every variant of the plan, and writes a module × variant table of the results. You can run it from a terminal or in GitHub Actions.
 
-```sh
-npm install --save-dev github:oidc-to/conformance
+The package is published to GitHub Packages, which wants a token even for reads. In `.npmrc`:
+
+```ini
+@oidc-to:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}
 ```
+
+```sh
+NODE_AUTH_TOKEN=$(gh auth token) npm install --save-dev @oidc-to/conformance
+```
+
+Locally, use any token with `read:packages`. In Actions, set `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` with `permissions: packages: read`; that token can read the package only if the package grants the workflow's repository access, or the package is public.
 
 ```jsonc
 // package.json
