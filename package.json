@@ -1,0 +1,32 @@
+{
+  "name": "@oidc-to/conformance",
+  "version": "0.1.0",
+  "description": "Run OpenID Foundation conformance suite test plans against an OpenID Provider, locally or in GitHub Actions",
+  "license": "MIT",
+  "author": "Christian Nuss",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oidc-to/conformance.git"
+  },
+  "homepage": "https://github.com/oidc-to/conformance#readme",
+  "type": "module",
+  "bin": {
+    "oidc-conformance": "bin/oidc-conformance.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "action.yml"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.8.1",
+    "playwright": "1.64.1",
+    "tunneld": "0.1.62"
+  }
+}

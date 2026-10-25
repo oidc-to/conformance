@@ -1,0 +1,95 @@
+name: Conformance
+
+# Called from an OP's repository that has @oidc-to/conformance as a devDependency, so CI runs
+# the version its lockfile pins, with its conformance.config.mjs. One job per variant.
+on:
+  workflow_call:
+    inputs:
+      issuer:
+        description: The OP's public https issuer
+        type: string
+        required: true
+      plan:
+        description: Test plan to run, every variant of it
+        type: string
+        default: oidcc-test-plan
+      config:
+        description: The config file; default conformance.config.mjs
+        type: string
+        default: ""
+      node-version:
+        type: string
+        default: lts/*
+
+permissions:
+  contents: read
+
+jobs:
+  variants:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.variants.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - id: variants
+        run: npx oidc-conformance variants --plan "$PLAN"
+        env:
+          PLAN: ${{ inputs.plan }}
+
+  conformance:
+    needs: variants
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - id: conformance
+        uses: ./node_modules/@oidc-to/conformance
+        with:
+          issuer: ${{ inputs.issuer }}
+          plan: ${{ inputs.plan }}
+          variant: ${{ matrix.variant }}
+          config: ${{ inputs.config }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: conformance-${{ strategy.job-index }}
+          path: .conformance/results
+          if-no-files-found: ignore
+
+  summary:
+    needs: conformance
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: conformance-*
+          path: jobs
+      - run: npx oidc-conformance merge --out merged jobs/*/summary.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: conformance
+          path: |
+            merged
+            jobs

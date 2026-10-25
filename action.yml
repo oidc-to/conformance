@@ -1,0 +1,63 @@
+name: OpenID conformance
+description: Run an OpenID Foundation conformance suite test plan against an OpenID Provider
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  issuer:
+    description: The OP's public https issuer
+    required: true
+  plan:
+    description: Test plan to run, every variant of it
+    default: oidcc-test-plan
+  variant:
+    description: Only the variants matching each comma-separated axis=value
+    default: ""
+  modules:
+    description: Only these test modules, comma separated
+    default: ""
+  config:
+    description: The config file, relative to the working directory; default conformance.config.mjs
+    default: ""
+  image-tag:
+    description: Conformance suite release; empty uses the one this version pins
+    default: ""
+  working-directory:
+    description: Where the config is and .conformance/results is written
+    default: .
+
+outputs:
+  results:
+    description: The directory holding summary.md, summary.json, screenshots and the suite's exports
+    value: ${{ steps.run.outputs.results }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.x"
+
+    # As a devDependency the package's dependencies are already installed beside it.
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      run: node -e 'import("@clack/prompts")' 2>/dev/null || npm ci --omit=dev --no-audit --no-fund
+
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      run: node "$(dirname "$(node -p 'require.resolve("playwright/package.json")')")/cli.js" install --with-deps chromium
+
+    - id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONFORMANCE_PLAN: ${{ inputs.plan }}
+        CONFORMANCE_VARIANT: ${{ inputs.variant }}
+        CONFORMANCE_MODULES: ${{ inputs.modules }}
+        CONFORMANCE_CONFIG: ${{ inputs.config }}
+        CONFORMANCE_IMAGE_TAG: ${{ inputs.image-tag }}
+        ISSUER: ${{ inputs.issuer }}
+      run: |
+        echo "results=$PWD/.conformance/results" >> "$GITHUB_OUTPUT"
+        node "$GITHUB_ACTION_PATH/bin/oidc-conformance.mjs" "$ISSUER"
