@@ -178,9 +178,12 @@ async function runCommand(args) {
   renderer = await startRenderer();
   if (!config.browser) console.warn("The config has no browser tasks: every module waits for a person to sign in.");
   const clients = new Clients();
-  const configs = await Promise.all(
-    runs.map((variant, index) =>
-      writeSuiteConfig(work, index, {
+  // One at a time: concurrent registrations can each land on a different instance of an OP
+  // that keeps its clients in memory.
+  const configs = [];
+  for (const [index, variant] of runs.entries()) {
+    configs.push(
+      await writeSuiteConfig(work, index, {
         config,
         clients,
         issuer,
@@ -190,8 +193,8 @@ async function runCommand(args) {
         remote,
         rendering: Boolean(renderer),
       }),
-    ),
-  );
+    );
+  }
 
   const collector = new Collector(suite, resultsDir, plan.planName, tag);
   const runner = new Runner({ suite, venv: suite.venv, resultsDir, collector, renderer, issuer });

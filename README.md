@@ -103,33 +103,22 @@ The context includes:
   if: always()
   with:
     name: conformance
-    path: .conformance/results
+    path: |
+      .conformance/results
+      !.conformance/results/*.zip
 ```
 
 The variants run one after another, so a plan with many variants needs a long `timeout-minutes`.
 
-### One job per variant
+### Against a deployed oidc.to
 
-The reusable workflow lists the plan's variants, runs each one in its own job, and merges the results into one table. It runs the `@oidc-to/conformance` version from your lockfile, so it needs the package as a devDependency.
+This repository's [Conformance](.github/workflows/conformance.yml) workflow runs `oidcc-test-plan` against the issuer you give it, one job per variant, and merges the results into one table. Start it from the Actions tab or with:
 
-```yaml
-name: Conformance
-
-on:
-  workflow_dispatch:
-    inputs:
-      issuer:
-        description: The OP's issuer
-        required: true
-
-jobs:
-  conformance:
-    uses: oidc-to/conformance/.github/workflows/conformance.yml@main
-    with:
-      issuer: ${{ inputs.issuer }}
+```sh
+gh workflow run conformance.yml -R oidc-to/conformance -f issuer=https://oidc.to.scaffoldly.dev
 ```
 
-Runner minutes count against the repository that calls the workflow. They're free only when that repository is public.
+It uses [`configs/oidc.to.mjs`](configs/oidc.to.mjs), which has oidc.to's sign-in automation and no keys. Every client is registered dynamically, and `oidcc-server-rotate-keys` is skipped. The `CONFORMANCE_MAX_PARALLEL` repository variable caps how many variants run at once. The uploaded artifacts leave out the suite's exported plans, because those contain client secrets and private keys.
 
 ## Commands
 
@@ -143,7 +132,7 @@ oidc-conformance merge [--out dir] <summary.json...>
 ## Security
 
 - While a run is in progress, anyone who has the suite's tunnel address can reach the suite. The address is random and goes away when the run ends.
-- `.conformance/results` holds the suite's exported plans. Those include the client configs, with their secrets and private keys. Treat the uploaded artifacts accordingly.
+- `.conformance/results` holds the suite's exported plans. Those include the client configs, with their secrets and private keys. Don't upload them anywhere public.
 
 ## License
 

@@ -1,28 +1,24 @@
 name: Conformance
 
-# Called from an OP's repository that has @oidc-to/conformance as a devDependency, so CI runs
-# the version its lockfile pins, with its conformance.config.mjs. One job per variant.
+# oidcc-test-plan against a deployed oidc.to, one job per variant, merged into one table.
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       issuer:
-        description: The OP's public https issuer
-        type: string
+        description: The deployed oidc.to's issuer
         required: true
-      plan:
-        description: Test plan to run, every variant of it
-        type: string
-        default: oidcc-test-plan
-      config:
-        description: The config file; default conformance.config.mjs
-        type: string
-        default: ""
-      node-version:
-        type: string
-        default: lts/*
+        default: https://oidc.to.scaffoldly.dev
 
 permissions:
   contents: read
+
+concurrency:
+  group: conformance-${{ inputs.issuer }}
+  cancel-in-progress: true
+
+env:
+  PLAN: oidcc-test-plan
+  CONFIG: configs/oidc.to.mjs
 
 jobs:
   variants:
@@ -33,13 +29,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: lts/*
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --omit=dev --no-audit --no-fund
       - id: variants
-        run: npx oidc-conformance variants --plan "$PLAN"
-        env:
-          PLAN: ${{ inputs.plan }}
+        run: node bin/oidc-conformance.mjs variants --plan "$PLAN"
 
   conformance:
     needs: variants
@@ -48,27 +42,30 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      # The repository variable CONFORMANCE_MAX_PARALLEL caps how many variants run at once.
+      max-parallel: ${{ fromJSON(vars.CONFORMANCE_MAX_PARALLEL || '256') }}
       matrix:
         include: ${{ fromJSON(needs.variants.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: lts/*
           cache: npm
-      - run: npm ci --no-audit --no-fund
-      - id: conformance
-        uses: ./node_modules/@oidc-to/conformance
+      - uses: ./
         with:
           issuer: ${{ inputs.issuer }}
-          plan: ${{ inputs.plan }}
+          plan: ${{ env.PLAN }}
           variant: ${{ matrix.variant }}
-          config: ${{ inputs.config }}
+          config: ${{ env.CONFIG }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: conformance-${{ strategy.job-index }}
-          path: .conformance/results
+          # The suite's exported plans hold the clients' secrets and private keys; this repo is public.
+          path: |
+            .conformance/results
+            !.conformance/results/*.zip
           if-no-files-found: ignore
 
   summary:
@@ -79,14 +76,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: lts/*
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --omit=dev --no-audit --no-fund
       - uses: actions/download-artifact@v8
         with:
           pattern: conformance-*
           path: jobs
-      - run: npx oidc-conformance merge --out merged jobs/*/summary.json
+      - run: node bin/oidc-conformance.mjs merge --out merged jobs/*/summary.json
       - uses: actions/upload-artifact@v7
         with:
           name: conformance
