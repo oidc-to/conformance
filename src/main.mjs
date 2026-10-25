@@ -1,5 +1,5 @@
 import { outro } from "@clack/prompts";
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Clients, loadConfig, writeSuiteConfig } from "./config.mjs";
 import {
@@ -14,7 +14,7 @@ import {
   parseVariant,
   rotateKeys,
 } from "./plans.mjs";
-import { deadline, poll, request, startAnnouncing, step, stopChildren } from "./process.mjs";
+import { alive, deadline, poll, request, startAnnouncing, step, stopChildren } from "./process.mjs";
 import { Runner, startRenderer } from "./run.mjs";
 import { Suite, tag } from "./suite.mjs";
 import { Collector, markdownSummary, merge, summarize, terminalSummary } from "./summary.mjs";
@@ -98,14 +98,33 @@ export function targetOf(words) {
 const work = resolve(".conformance");
 const resultsDir = join(work, "results");
 const suite = new Suite(work);
+const lockFile = join(work, "run.pid");
 let renderer;
 let tornDown;
+
+// Runs in one directory share .conformance, so one at a time.
+function lock() {
+  let pid;
+  try {
+    pid = Number(readFileSync(lockFile, "utf8"));
+  } catch {}
+  if (pid && pid !== process.pid && alive(pid)) throw new Error(`another run, pid ${pid}, is using ${work}`);
+  mkdirSync(work, { recursive: true });
+  writeFileSync(lockFile, String(process.pid));
+}
+
+function unlock() {
+  try {
+    if (Number(readFileSync(lockFile, "utf8")) === process.pid) unlinkSync(lockFile);
+  } catch {}
+}
 
 function teardown() {
   tornDown ??= (async () => {
     stopChildren();
     await renderer?.browser().close().catch(() => {});
     await suite.stop().catch(() => {});
+    unlock();
   })();
   return tornDown;
 }
@@ -130,6 +149,7 @@ async function mergeCommand(args) {
 }
 
 async function variantsCommand(args) {
+  lock();
   await suite.start({ publish: false });
   const plan = findPlan(suite.get("plan/available"), args.plan || defaultPlan);
   const runs = matchingVariants(plan, parseVariant(args.variant));
@@ -169,6 +189,7 @@ async function runCommand(args) {
   };
   const interactive = process.stdin.isTTY && !process.env.CI && !env.plan && !env.variant && !env.modules;
 
+  lock();
   rmSync(resultsDir, { recursive: true, force: true });
   mkdirSync(resultsDir, { recursive: true });
   await suite.start({ publish: true });

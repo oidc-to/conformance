@@ -4,7 +4,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright";
 import { planName, rotateKeys } from "./plans.mjs";
 import { poll, request, step } from "./process.mjs";
-import { local } from "./suite.mjs";
 
 // Renders the pages the suite's browser was served, for REVIEW screenshot slots.
 export async function startRenderer() {
@@ -36,7 +35,7 @@ export class Runner {
         stdio: ["ignore", "pipe", "inherit"],
         env: {
           ...process.env,
-          CONFORMANCE_SERVER: `${local}/`,
+          CONFORMANCE_SERVER: `${this.suite.api}/`,
           CONFORMANCE_DEV_MODE: "1",
           // The breaker is for a dead suite; an OP failing every module is expected here.
           CONFORMANCE_MAX_CONSECUTIVE_FAILURES: "1000000",

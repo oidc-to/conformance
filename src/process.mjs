@@ -34,6 +34,15 @@ export async function poll(what, seconds, check) {
   throw new Error(`timed out after ${seconds}s waiting for ${what}`);
 }
 
+export function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
 // Rejects after seconds, saying hint once after hintAfter seconds.
 export async function deadline(promise, what, seconds, { hint, hintAfter = 30 } = {}) {
   const timers = [];
