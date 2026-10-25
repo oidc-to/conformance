@@ -2,6 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { request } from "./process.mjs";
 
 const secretMethods = ["client_secret_basic", "client_secret_post", "client_secret_jwt"];
 
@@ -45,7 +46,7 @@ export class Clients {
       throw new Error("the OP has no registration_endpoint; give the config a client function");
     }
     const { d: _, ...publicKey } = key;
-    const response = await fetch(discovery.registration_endpoint, {
+    const response = await request(discovery.registration_endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

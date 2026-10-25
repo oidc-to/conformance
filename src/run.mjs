@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "playwright";
 import { planName, rotateKeys } from "./plans.mjs";
-import { poll } from "./process.mjs";
+import { poll, request, step } from "./process.mjs";
 import { local } from "./suite.mjs";
 
 // Renders the pages the suite's browser was served, for REVIEW screenshot slots.
@@ -56,6 +56,9 @@ export class Runner {
       };
       child.stdout.on("data", (chunk) => {
         process.stdout.write(chunk);
+        for (const [, n] of chunk.toString().matchAll(/Running plan \[(\d+)\]/g)) {
+          step(`Variant ${n}/${runs.length}: ${Object.values(runs[n - 1] ?? {}).join(" · ") || name}`);
+        }
         for (const [, id] of chunk.toString().matchAll(/Created test plan, new id: (\S+)/g)) plans.push(id);
         for (const [, id] of chunk.toString().matchAll(/Created test module, new id: (\S+)/g)) {
           if (this.renderer) screenshots.push(this.fillScreenshots(id));
@@ -94,9 +97,9 @@ export class Runner {
     console.log(`Running test module: ${rotateKeys}, new id: ${id}`);
     if ((await this.moduleStatus(id, ["CONFIGURED", "FINISHED", "INTERRUPTED"])) !== "CONFIGURED") return;
 
-    const before = await (await fetch(jwksUri)).text();
+    const before = await (await request(jwksUri)).text();
     await rotate();
-    await poll("the rotated signing key", 60, async () => (await (await fetch(jwksUri)).text()) !== before);
+    await poll("the rotated signing key", 60, async () => (await (await request(jwksUri)).text()) !== before);
     console.log("Rotated the signing key");
 
     this.suite.post(`runner/${id}`);

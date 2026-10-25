@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { poll, run, tunnel } from "./process.mjs";
+import { deadline, poll, request, run, step, tunnel } from "./process.mjs";
 
 export const tag = process.env.CONFORMANCE_IMAGE_TAG || "release-v5.3.3";
 const project = "oidc-to-conformance";
@@ -26,6 +26,7 @@ export class Suite {
   async download() {
     // run-test-plan.py loads client certificates from here and fails if it is missing.
     mkdirSync(join(this.dir, "certs-keys"), { recursive: true });
+    step(`Downloading suite ${tag}…`);
     const raw = `https://gitlab.com/openid/conformance-suite/-/raw/${tag}`;
     const files = {
       "docker-compose-prebuilt.yml": `${raw}/docker-compose-prebuilt.yml`,
@@ -37,6 +38,7 @@ export class Suite {
     for (const [name, url] of Object.entries(files)) {
       await run("curl", ["-fsSLo", join(this.dir, name), url]);
     }
+    step("Installing runner requirements…");
     if (!existsSync(this.venv)) await run("python3", ["-m", "venv", this.venv]);
     await run(join(this.venv, "bin/pip"), [
       "install",
@@ -54,22 +56,27 @@ export class Suite {
     // Mongo's bind-mounted data dir fails to reopen on macOS; each run starts empty.
     const override = ["services:", "  mongodb:", "    volumes: !reset []"];
     if (publish) {
-      ({ origin: this.public } = await tunnel(`http://localhost:${httpPort}`));
-      console.log(`suite ${this.public}`);
+      step("Opening the suite's tunnel…");
+      ({ origin: this.public } = await deadline(tunnel(`http://localhost:${httpPort}`), "the suite's tunnel", 120));
+      step(`Suite tunnel: ${this.public}`);
       override.push("  server:", "    ports:", `      - "127.0.0.1:${httpPort}:8080"`);
     }
     writeFileSync(join(this.dir, "compose.override.yml"), `${override.join("\n")}\n`);
+    step("Starting the suite (docker compose)…");
     await this.compose("up", "-d");
+    step("Waiting for the suite…");
     await poll("the conformance suite", 300, async () => this.status("runner/available") === "200");
     if (publish) {
       await poll("the conformance suite through its tunnel", 120, async () => {
-        const res = await fetch(`${this.public}/api/runner/available`);
+        const res = await request(`${this.public}/api/runner/available`);
         return res.ok;
       });
     }
+    step("Suite ready");
   }
 
   stop() {
+    step("Stopping the suite…");
     return this.compose("down", "-v");
   }
 

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { Clients, suiteConfig } from "../src/config.mjs";
 import { parseArgs, targetOf } from "../src/main.mjs";
 import { combinations, formatVariant, matchingVariants, parseVariant, planName } from "../src/plans.mjs";
-import { children, startAnnouncing, stopChildren } from "../src/process.mjs";
+import { children, request, startAnnouncing, userAgent } from "../src/process.mjs";
 import { merge, summarize } from "../src/summary.mjs";
 
 test("options come before the target, which keeps its own flags", () => {
@@ -86,9 +86,9 @@ test("merge rebases screenshot paths onto the output directory", async () => {
 
 test("a started command's issuer is the first https origin it prints", async () => {
   const script = `console.log("> app dev"); console.log("https://0tabc.example.test/?0"); setInterval(() => {}, 1000);`;
-  const { origin } = await startAnnouncing(process.execPath, ["-e", script], { echo: false });
+  const { origin, child } = await startAnnouncing(process.execPath, ["-e", script], { echo: false });
   assert.equal(origin, "https://0tabc.example.test");
-  stopChildren();
+  process.kill(-child.pid, "SIGINT");
   children.length = 0;
 });
 
@@ -128,4 +128,35 @@ test("the suite config takes clients, browser tasks and overrides from the confi
   assert.deepEqual(result.browser[0].placeholder, ["update-image-placeholder-optional"]);
   assert.equal(result.server.jwks_uri, "https://op.example/jwks");
   assert.deepEqual(result.override, { m: {} });
+});
+
+test("deadline hints once, then gives up", async () => {
+  const { deadline } = await import("../src/process.mjs");
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (text) => warnings.push(text);
+  try {
+    await assert.rejects(
+      deadline(new Promise(() => {}), "an origin", 0.2, { hint: "no origin yet", hintAfter: 0.05 }),
+      /timed out after 0.2s waiting for an origin/,
+    );
+  } finally {
+    console.warn = warn;
+  }
+  assert.deepEqual(warnings, ["no origin yet"]);
+  assert.equal(await deadline(Promise.resolve(1), "x", 1), 1);
+});
+
+test("requests name the runner and its version", async () => {
+  const { createServer } = await import("node:http");
+  const version = JSON.parse((await import("node:fs")).readFileSync(new URL("../package.json", import.meta.url))).version;
+  assert.equal(userAgent, `oidc-conformance/${version} (+https://github.com/oidc-to/conformance)`);
+  const server = createServer((req, res) => res.end(req.headers["user-agent"]));
+  await new Promise((resolve) => server.listen(0, resolve));
+  try {
+    const res = await request(`http://127.0.0.1:${server.address().port}/`, { headers: { Accept: "text/plain" } });
+    assert.equal(await res.text(), userAgent);
+  } finally {
+    server.close();
+  }
 });

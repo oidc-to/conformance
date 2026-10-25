@@ -14,7 +14,7 @@ import {
   parseVariant,
   rotateKeys,
 } from "./plans.mjs";
-import { poll, startAnnouncing, stopChildren } from "./process.mjs";
+import { deadline, poll, request, startAnnouncing, step, stopChildren } from "./process.mjs";
 import { Runner, startRenderer } from "./run.mjs";
 import { Suite, tag } from "./suite.mjs";
 import { Collector, markdownSummary, merge, summarize, terminalSummary } from "./summary.mjs";
@@ -128,12 +128,18 @@ async function startOp(target, args) {
   const [command, ...rest] = target.command;
   // A single word with spaces is a command line, as npm scripts and workflow inputs give one.
   const shell = !rest.length && /\s/.test(command);
+  step(`Starting OP: ${target.command.join(" ")}`);
   const started = startAnnouncing(command, rest, { shell, echo: true });
   if (args.issuer) {
     started.catch(() => {});
     return new URL(args.issuer).origin;
   }
-  const { origin } = await started;
+  step("Waiting for an https:// origin on the command's stdout…");
+  const { origin } = await deadline(started, "an https:// origin on the command's stdout", 180, {
+    hint:
+      "No https:// origin yet. The suite reaches the OP over the internet, so the command has to put it on a " +
+      "public https address and print it, as tunneld does. Otherwise pass --issuer.",
+  });
   return origin;
 }
 
@@ -168,15 +174,19 @@ async function runCommand(args) {
     if (!runs.length) throw new Error(`no ${plan.planName} variant matches ${env.variant}`);
   }
 
+  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  step(`Plan ${plan.planName}: ${count(runs.length, "variant")}, ${count(modules.length || plan.modules.length, "module")}`);
   const issuer = await startOp(target, args);
-  console.log(`issuer ${issuer}`);
+  step(`Issuer: ${issuer}`);
+  step(`Waiting for ${issuer}/.well-known/openid-configuration…`);
   const discovery = await poll("discovery", 300, async () => {
-    const res = await fetch(`${issuer}/.well-known/openid-configuration`);
+    const res = await request(`${issuer}/.well-known/openid-configuration`);
     return res.ok && res.json();
   });
 
   renderer = await startRenderer();
   if (!config.browser) console.warn("The config has no browser tasks: every module waits for a person to sign in.");
+  step(`Writing ${runs.length === 1 ? "the suite config" : `${runs.length} suite configs`}…`);
   const clients = new Clients();
   // One at a time: concurrent registrations can each land on a different instance of an OP
   // that keeps its clients in memory.
