@@ -143,6 +143,35 @@ test("the suite config takes clients, browser tasks and overrides from the confi
   assert.deepEqual(result.override, { m: {} });
 });
 
+test("extra adds top-level suite config, under the keys the runner builds", async () => {
+  const seen = [];
+  const config = {
+    client: ({ name }) => ({ client_id: name }),
+    extra: ({ variant, issuer }) => (seen.push(variant), { ekyc: { userinfo: { iss: issuer } }, alias: "lost", server: {} }),
+  };
+  const result = await suiteConfig({
+    config,
+    clients: new Clients(),
+    issuer: "https://op.example",
+    suite: "https://suite.example",
+    discovery: { issuer: "https://op.example" },
+    variant: { ekyc_profile: "plain_ekyc" },
+  });
+  assert.deepEqual(seen, [{ ekyc_profile: "plain_ekyc" }]);
+  assert.deepEqual(result.ekyc, { userinfo: { iss: "https://op.example" } });
+  assert.equal(result.alias, "conformance");
+  assert.deepEqual(result.server, { discoveryUrl: "https://op.example/.well-known/openid-configuration" });
+  const fixed = await suiteConfig({
+    config: { client: () => ({}), extra: { ekyc: { userinfo: {} } } },
+    clients: new Clients(),
+    issuer: "https://op.example",
+    suite: "https://suite.example",
+    discovery: {},
+    variant: {},
+  });
+  assert.deepEqual(fixed.ekyc, { userinfo: {} });
+});
+
 test("a client is registered once per run for each name and method", async () => {
   const { createServer } = await import("node:http");
   const bodies = [];

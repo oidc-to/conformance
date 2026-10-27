@@ -113,6 +113,8 @@ export async function suiteConfig({ config, clients, issuer, suite, discovery, v
     return (await config.client?.(clientContext)) ?? clientContext.register();
   };
   return {
+    // Other top-level suite config, like the eKYC plans' ekyc; the keys below win.
+    ...value(config.extra, context),
     alias,
     description: value(config.description, context) ?? `${issuer}`,
     // server_metadata=static reads from here what discovery would have said.

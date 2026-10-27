@@ -84,6 +84,11 @@ export default ({ remote }) => ({
   // Per-module config overrides, as the suite's config file takes them.
   override: {},
 
+  // Any other top-level keys of the suite's config, such as ekyc for the eKYC plans. The keys the
+  // runner builds (alias, description, server, client, client2, client_secret_post, browser,
+  // override) win over these.
+  extra: { ekyc: { userinfo: {}, verified_claims_request_list: [], expected_verified_claims: {} } },
+
   // oidcc-server-rotate-keys waits for the OP to rotate its signing key. This does it; the runner
   // then polls jwks_uri until it changes. Without it, the module is skipped.
   rotateKeys: remote ? undefined : async ({ issuer, discovery }) => {},
