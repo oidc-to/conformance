@@ -5,6 +5,7 @@ import { parseArgs, resolveTarget, targetOf, UsageError } from "../src/main.mjs"
 import { chunks, combinations, formatVariant, matchingVariants, parseVariant, planName } from "../src/plans.mjs";
 import { children, request, startAnnouncing, userAgent } from "../src/process.mjs";
 import { merge, summarize } from "../src/summary.mjs";
+import { Runner } from "../src/run.mjs";
 
 test("options come before the target, which keeps its own flags", () => {
   assert.deepEqual(parseArgs(["--plan", "p", "npm", "run", "dev", "--", "--port", "1"]), {
@@ -121,6 +122,39 @@ test("server adds to the suite's server config, under the keys the runner builds
   const fixed = await suiteConfig(options({ server: allowed }, { server_metadata: "static" }));
   assert.deepEqual(fixed.server.allow_unexpected_metadata_fields, ["verified_claims_supported"]);
   assert.equal(fixed.server.issuer, "https://op.example");
+});
+
+test("a screenshot waits for the suite's browser, since filling a slot can end the module", async () => {
+  const page = [
+    { upload: "slot", src: "ExpectLoginPage" },
+    { response_content: "<p>hi</p>", response_content_type: "text/html" },
+    { url: "https://op.example/continue" },
+  ];
+  let browser = { uploadsRequired: 1, runners: [{ url: "https://op.example/authorize" }] };
+  let status = "WAITING";
+  const uploads = [];
+  const suite = {
+    get(path) {
+      if (path.startsWith("info/")) return { status };
+      if (path.startsWith("runner/")) return { browser };
+      return page;
+    },
+    post(path) {
+      uploads.push(path);
+      status = "FINISHED";
+    },
+  };
+  const runner = Object.assign(Object.create(Runner.prototype), {
+    suite,
+    issuer: "https://op.example",
+    screenshot: async () => Buffer.from("png"),
+  });
+  const filling = runner.fillScreenshots("id");
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  assert.deepEqual(uploads, []);
+  browser = { uploadsRequired: 1, runners: [] };
+  await filling;
+  assert.deepEqual(uploads, ["log/id/images/slot"]);
 });
 
 test("a started command's issuer is the first https origin it prints", async () => {

@@ -142,7 +142,11 @@ export class Runner {
     return poll(`${id} to finish`, 300, async () => {
       const { status } = this.suite.get(`info/${id}`);
       if (status === "FINISHED" || status === "INTERRUPTED") return true;
-      if (!this.suite.get(`runner/${id}`).browser?.uploadsRequired) return false;
+      const { browser } = this.suite.get(`runner/${id}`);
+      if (!browser?.uploadsRequired) return false;
+      // A module ends once its slots are filled and it's WAITING, which it also is between two
+      // requests from its browser. Filling one then fails the browser's next request.
+      if (browser.runners?.length) return false;
       const log = this.suite.get(`log/${id}`);
       for (const slot of log.filter(({ upload }) => upload && !open.get(upload)?.failed)) {
         open.set(slot.upload, { src: slot.src });
