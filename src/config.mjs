@@ -118,8 +118,9 @@ export async function suiteConfig({ config, clients, issuer, suite, discovery, v
     alias,
     description: value(config.description, context) ?? `${issuer}`,
     // server_metadata=static reads from here what discovery would have said.
-    server:
-      variant.server_metadata === "static"
+    server: {
+      ...value(config.server, context),
+      ...(variant.server_metadata === "static"
         ? {
             issuer: discovery.issuer,
             jwks_uri: discovery.jwks_uri,
@@ -129,7 +130,8 @@ export async function suiteConfig({ config, clients, issuer, suite, discovery, v
             registration_endpoint: discovery.registration_endpoint,
             acr_values: discovery.acr_values_supported?.join(" "),
           }
-        : { discoveryUrl: `${issuer}/.well-known/openid-configuration` },
+        : { discoveryUrl: `${issuer}/.well-known/openid-configuration` }),
+    },
     client: await client("client", method),
     client2: await client("client2", method),
     // oidcc-server-client-secret-post uses this instead of client.

@@ -97,6 +97,32 @@ test("merge rebases screenshot paths onto the output directory", async () => {
   assert.equal(data.runs[0].modules[0].shots[0].file, "../job-1/screenshots/v/m1-s.png");
 });
 
+test("server adds to the suite's server config, under the keys the runner builds", async () => {
+  const options = (config, variant = {}) => ({
+    config: { client: () => ({}), ...config },
+    clients: new Clients(),
+    issuer: "https://op.example",
+    suite: "https://suite.example",
+    discovery: { issuer: "https://op.example" },
+    variant,
+  });
+  const allowed = { allow_unexpected_metadata_fields: ["verified_claims_supported"] };
+  assert.deepEqual((await suiteConfig(options({ server: allowed }))).server, {
+    ...allowed,
+    discoveryUrl: "https://op.example/.well-known/openid-configuration",
+  });
+  const computed = await suiteConfig(
+    options({ server: ({ issuer }) => ({ note: issuer, discoveryUrl: "https://lost.example" }) }),
+  );
+  assert.deepEqual(computed.server, {
+    note: "https://op.example",
+    discoveryUrl: "https://op.example/.well-known/openid-configuration",
+  });
+  const fixed = await suiteConfig(options({ server: allowed }, { server_metadata: "static" }));
+  assert.deepEqual(fixed.server.allow_unexpected_metadata_fields, ["verified_claims_supported"]);
+  assert.equal(fixed.server.issuer, "https://op.example");
+});
+
 test("a started command's issuer is the first https origin it prints", async () => {
   const script = `console.log("> app dev"); console.log("https://0tabc.example.test/?0"); setInterval(() => {}, 1000);`;
   const { origin, child } = await startAnnouncing(process.execPath, ["-e", script], { echo: false });

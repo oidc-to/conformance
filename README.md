@@ -84,6 +84,10 @@ export default ({ remote }) => ({
   // Per-module config overrides, as the suite's config file takes them.
   override: {},
 
+  // More of the suite's server config, such as metadata the suite doesn't recognize. The keys the
+  // runner sets for the OP's metadata win over these.
+  server: { allow_unexpected_metadata_fields: ["verified_claims_supported"] },
+
   // Any other top-level keys of the suite's config, such as ekyc for the eKYC plans. The keys the
   // runner builds (alias, description, server, client, client2, client_secret_post, browser,
   // override) win over these.
